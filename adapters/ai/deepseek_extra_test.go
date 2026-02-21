@@ -24,6 +24,20 @@ func TestNewDeepSeekAdapterValidationAndDefaults(t *testing.T) {
 	}
 }
 
+func TestNewDeepSeekAdapterSystemPromptPriority(t *testing.T) {
+	a, err := NewDeepSeekAdapter(DeepSeekOptions{
+		APIKey:       "k",
+		SystemPrompt: "prompt-A",
+		SystemHint:   "prompt-B",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.prompt != "prompt-A" {
+		t.Fatalf("expected SystemPrompt to have priority, got: %s", a.prompt)
+	}
+}
+
 func TestExtractContentErrorsAndFence(t *testing.T) {
 	if _, err := extractContent([]byte(`{"choices":[]}`)); err == nil {
 		t.Fatalf("expected error")

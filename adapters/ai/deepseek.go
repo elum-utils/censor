@@ -14,7 +14,7 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-const defaultSystemPrompt = `You are a content safety classifier. Return strict JSON only.
+const defaultSystemPrompt = `You are a content safety classifier for an anonymous messenger. Return strict JSON only.
 Use code:
 1 clean
 2 non-critical abuse
@@ -22,6 +22,14 @@ Use code:
 4 commercial/off-platform
 5 dangerous/illegal
 6 critical
+
+Domain rules:
+- Intimate/sexual conversation between users is allowed by default.
+- Critical priority: detect sales/commercial intent, including intimate services/content sold for money.
+- Escalate commercial behavior when messages contain calls to move to other platforms specifically to continue selling, payment, booking, or deal execution.
+- Neutral contact exchange is allowed (e.g., "let's chat later in Telegram/VK") when there is no sales intent.
+- Base classification on intent and context, not platform names alone.
+
 Trigger tokens can be single words or short phrases, each max 255 characters.
 Return compact format: {"a":status_code,"b":"reason","c":confidence,"d":["trigger_tokens"],"e":violator_user_id,"f":message_id}.
 For batch input, return array of objects.`
@@ -37,10 +45,12 @@ type DeepSeekAdapter struct {
 
 // DeepSeekOptions configures adapter.
 type DeepSeekOptions struct {
-	APIKey     string
-	BaseURL    string
-	Model      string
-	Timeout    time.Duration
+	APIKey       string
+	BaseURL      string
+	Model        string
+	Timeout      time.Duration
+	SystemPrompt string
+	// SystemHint is kept for backward compatibility. SystemPrompt has priority.
 	SystemHint string
 }
 
@@ -59,7 +69,9 @@ func NewDeepSeekAdapter(opt DeepSeekOptions) (*DeepSeekAdapter, error) {
 		opt.Timeout = 15 * time.Second
 	}
 	prompt := defaultSystemPrompt
-	if strings.TrimSpace(opt.SystemHint) != "" {
+	if strings.TrimSpace(opt.SystemPrompt) != "" {
+		prompt = opt.SystemPrompt
+	} else if strings.TrimSpace(opt.SystemHint) != "" {
 		prompt = opt.SystemHint
 	}
 	return &DeepSeekAdapter{
