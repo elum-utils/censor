@@ -30,6 +30,7 @@ profile.out
 .env.development
 .env.test
 .env.staging
+.gocache
 
 # Local configuration files
 config.local.*
