@@ -22,6 +22,7 @@ Use code:
 4 commercial/off-platform
 5 dangerous/illegal
 6 critical
+Trigger tokens can be single words or short phrases, each max 255 characters.
 Return compact format: {"a":status_code,"b":"reason","c":confidence,"d":["trigger_tokens"],"e":violator_user_id,"f":message_id}.
 For batch input, return array of objects.`
 

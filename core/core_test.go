@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -231,5 +232,28 @@ func TestProcessBatchWithOptionsSkipTriggerFilter(t *testing.T) {
 	}
 	if res[0].AIResult.StatusCode != models.StatusSuspicious {
 		t.Fatalf("unexpected status: %d", res[0].AIResult.StatusCode)
+	}
+}
+
+func TestAutoLearnSkipsTooLongPhrase(t *testing.T) {
+	longPhrase := strings.Repeat("a", 256)
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:    models.StatusSuspicious,
+		Confidence:    0.95,
+		TriggerTokens: []string{longPhrase},
+	}}
+	st := newMockStorage("bad")
+	c := New(Options{
+		AIAnalyzer:          ai,
+		Storage:             st,
+		ConfidenceThreshold: 0.7,
+		MaxLearnTokenLength: 255,
+		AutoLearn:           true,
+	})
+	_ = c.SyncOnce(context.Background())
+	_, _ = c.ProcessBatch(context.Background(), []models.Message{{ID: 1, User: 2, Data: "bad"}})
+	time.Sleep(20 * time.Millisecond)
+	if st.hasToken(longPhrase) {
+		t.Fatalf("too long token must not be persisted")
 	}
 }

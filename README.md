@@ -80,6 +80,7 @@ func Service(db *sql.DB, apiKey, model, baseURL string) func(ctx context.Context
 			SyncInterval:        1 * time.Minute,
 			ConfidenceThreshold: 0.7,
 			MaxMessageSize:      4 * 1024,
+			MaxLearnTokenLength: 255, // AI может добавлять слова и фразы до 255 символов
 		})
 
 		_ = c.OnAllowClean(func(ctx context.Context, e censor.ViolationEvent) error {

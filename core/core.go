@@ -18,6 +18,7 @@ const (
 	defaultConfidenceThreshold = 0.7
 	defaultSyncInterval        = 5 * time.Minute
 	defaultMaxMessageSize      = 4 * 1024
+	defaultMaxLearnTokenLength = 255
 )
 
 // EventName is a callback bus event.
@@ -64,6 +65,7 @@ type Options struct {
 	ConfidenceThreshold float64
 	SyncInterval        time.Duration
 	MaxMessageSize      int
+	MaxLearnTokenLength int
 	AutoLearn           bool
 	DisableAutoLearn    bool
 }
@@ -80,6 +82,7 @@ type Core struct {
 	confidenceThreshold float64
 	syncInterval        time.Duration
 	maxMessageSize      int
+	maxLearnTokenLength int
 	autoLearn           bool
 
 	eventsMu sync.RWMutex
@@ -97,6 +100,7 @@ func New(opt Options) *Core {
 		confidenceThreshold: defaultConfidenceThreshold,
 		syncInterval:        defaultSyncInterval,
 		maxMessageSize:      defaultMaxMessageSize,
+		maxLearnTokenLength: defaultMaxLearnTokenLength,
 		autoLearn:           true,
 	}
 
@@ -108,6 +112,9 @@ func New(opt Options) *Core {
 	}
 	if opt.MaxMessageSize > 0 {
 		c.maxMessageSize = opt.MaxMessageSize
+	}
+	if opt.MaxLearnTokenLength > 0 {
+		c.maxLearnTokenLength = opt.MaxLearnTokenLength
 	}
 	if opt.AutoLearn {
 		c.autoLearn = true
@@ -343,16 +350,28 @@ func (c *Core) learn(result models.AIResult) {
 		return
 	}
 	for _, token := range result.TriggerTokens {
-		if !c.engine.AddToken(token) {
+		normalized := strings.ToLower(strings.TrimSpace(token))
+		if normalized == "" {
+			continue
+		}
+		if len(normalized) > c.maxLearnTokenLength {
+			c.logWarn("token exceeds max learn length", map[string]any{
+				"token":      normalized,
+				"length":     len(normalized),
+				"max_length": c.maxLearnTokenLength,
+			})
+			continue
+		}
+		if !c.engine.AddToken(normalized) {
 			continue
 		}
 		go func(tok string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			if err := c.storage.AddToken(ctx, strings.ToLower(strings.TrimSpace(tok))); err != nil {
+			if err := c.storage.AddToken(ctx, tok); err != nil {
 				c.logWarn("token persist failed", map[string]any{"error": err.Error(), "token": tok})
 			}
-		}(token)
+		}(normalized)
 	}
 }
 
