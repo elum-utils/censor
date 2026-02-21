@@ -1,0 +1,193 @@
+# Binaries and Executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go-specific binaries
+*.bin
+*.a
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+# *.html
+*.xml
+# *.json
+coverage.txt
+coverage.*
+profile.out
+
+# Environment and Configuration Files
+.env
+*.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+.env.staging
+
+# Local configuration files
+config.local.*
+config/*.local.*
+*.config.local.*
+
+# Logs and Debugging
+*.log
+logs/
+log/
+*.log.*
+debug.log
+error.log
+access.log
+
+# Application logs
+app.log
+server.log
+*.log.gz
+*.log.zip
+
+# Debug files
+__debug*
+debug
+debug.*
+*.debug
+*.pprof
+*.trace
+cpu.pprof
+mem.pprof
+heap.pprof
+goroutine.pprof
+block.pprof
+mutex.pprof
+
+# OS-specific files
+.DS_Store           
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db        
+Thumbs.db          
+desktop.ini        
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+.tmp/
+.temp/
+*.db
+
+# Go cache
+/.cache/
+
+go.work
+go.work.sum
+
+# Vendor directory
+vendor/
+
+# Packages directory
+/pkg/
+
+# Build directories
+/dist/
+/build/
+/out/
+/bin/
+/output/
+
+# IDE artifacts
+.idea/
+.vscode/
+*.swp              # Vim swap files
+*.swo              # Vim swap files
+*~                 # Backup files
+
+# Local metrics storage
+/metrics/
+/prometheus/data/
+
+# Dashboards and reports
+*.report
+*.metrics
+*.stats
+
+# Auto-generated documentation
+/doc/
+/docs/api/
+/swagger/
+
+# Auto-generated protocol files
+*.pb.go
+*.pb.gw.go
+*.swagger.json
+*.swagger.yaml
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+/data/
+/storage/local/
+
+# Migration states (local)
+migrations/*.down.sql
+
+# Local certificates and keys
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files
+*.bak
+*.backup
+
+# Archives
+*.zip
+*.tar.gz
+*.tgz
+
+# Dependency packages
+*.tgz
+*.lock
+
+# IDE project files
+.project
+.classpath
+.settings/
+*.iml
+*.ipr
+*.iws
+
+# Deployment-specific files
+.dockerignore
+.docker/
+.docker-compose.override.yml
+
+# These files should be tracked by git
+!_*.json
+!.vscode*
+!vendor/vendor.json
+!config.dev.env
+!.env.example
+!.env.sample
+!config.example.*
+!docker-compose.yml
+!Dockerfile
+!Makefile
+!go.mod
+!go.sum
+!README.md
+!LICENSE
+!CHANGELOG.md
+!CONTRIBUTING.md
+.gocache/
