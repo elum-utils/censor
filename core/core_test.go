@@ -204,3 +204,32 @@ func TestConcurrentProcess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestProcessBatchWithOptionsSkipTriggerFilter(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{StatusCode: models.StatusSuspicious, Confidence: 0.8}}
+	c := New(Options{AIAnalyzer: ai, Storage: newMockStorage("only-this-token")})
+	if err := c.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.ProcessBatchWithOptions(
+		context.Background(),
+		[]models.Message{{ID: 1, User: 2, Data: "message without any token"}},
+		ProcessOptions{SkipTriggerFilter: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("unexpected result len: %d", len(res))
+	}
+	if !ai.batchCalled.Load() {
+		t.Fatalf("AI must be called when SkipTriggerFilter=true")
+	}
+	if res[0].Triggered {
+		t.Fatalf("Triggered should be false when trigger pre-filter is bypassed")
+	}
+	if res[0].AIResult.StatusCode != models.StatusSuspicious {
+		t.Fatalf("unexpected status: %d", res[0].AIResult.StatusCode)
+	}
+}

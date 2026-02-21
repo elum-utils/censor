@@ -6,6 +6,7 @@ import "github.com/elum-utils/censor/core"
 type (
 	Core           = core.Core
 	Options        = core.Options
+	ProcessOptions = core.ProcessOptions
 	EventName      = core.EventName
 	ViolationEvent = core.ViolationEvent
 	EventHandler   = core.EventHandler

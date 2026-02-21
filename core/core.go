@@ -47,6 +47,12 @@ type ViolationEvent struct {
 // EventHandler handles one moderation event.
 type EventHandler func(ctx context.Context, event ViolationEvent) error
 
+// ProcessOptions controls behavior of message checks.
+type ProcessOptions struct {
+	// SkipTriggerFilter forces AI analysis without in-memory trigger pre-filter.
+	SkipTriggerFilter bool
+}
+
 // Options configure core filter.
 type Options struct {
 	AIAnalyzer      interfaces.AIAnalyzer
@@ -204,7 +210,12 @@ func (c *Core) SyncOnce(ctx context.Context) error {
 
 // ProcessMessage processes one message.
 func (c *Core) ProcessMessage(ctx context.Context, message models.Message) (models.Violation, error) {
-	res, err := c.ProcessBatch(ctx, []models.Message{message})
+	return c.ProcessMessageWithOptions(ctx, message, ProcessOptions{})
+}
+
+// ProcessMessageWithOptions processes one message with custom process behavior.
+func (c *Core) ProcessMessageWithOptions(ctx context.Context, message models.Message, opt ProcessOptions) (models.Violation, error) {
+	res, err := c.ProcessBatchWithOptions(ctx, []models.Message{message}, opt)
 	if err != nil {
 		return models.Violation{}, err
 	}
@@ -216,6 +227,11 @@ func (c *Core) ProcessMessage(ctx context.Context, message models.Message) (mode
 
 // ProcessBatch processes multiple messages with trigger pre-filter and AI stage.
 func (c *Core) ProcessBatch(ctx context.Context, messages []models.Message) ([]models.Violation, error) {
+	return c.ProcessBatchWithOptions(ctx, messages, ProcessOptions{})
+}
+
+// ProcessBatchWithOptions processes multiple messages with custom process behavior.
+func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Message, opt ProcessOptions) ([]models.Violation, error) {
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -231,6 +247,11 @@ func (c *Core) ProcessBatch(ctx context.Context, messages []models.Message) ([]m
 		prepared := msg
 		if len(prepared.Data) > c.maxMessageSize {
 			prepared.Data = prepared.Data[:c.maxMessageSize]
+		}
+		if opt.SkipTriggerFilter {
+			toAnalyze = append(toAnalyze, prepared)
+			preTrigger[prepared.ID] = nil
+			continue
 		}
 		triggers := c.engine.FindTriggers(prepared.Data)
 		if len(triggers) == 0 {
@@ -284,7 +305,7 @@ func (c *Core) ProcessBatch(ctx context.Context, messages []models.Message) ([]m
 		if len(r.TriggerTokens) == 0 {
 			r.TriggerTokens = preTrigger[msg.ID]
 		}
-		v := models.Violation{Message: msg, Triggered: true, AIResult: r}
+		v := models.Violation{Message: msg, Triggered: len(preTrigger[msg.ID]) > 0, AIResult: r}
 		c.learn(r)
 		c.record(v)
 		out = append(out, v)
