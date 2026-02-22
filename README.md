@@ -3,18 +3,19 @@
 `github.com/elum-utils/censor` — пакет многоуровневой модерации контента на Go:
 
 1. Быстрый in-memory pre-filter (case-insensitive, low-allocation).
-2. AI-анализ только для сообщений с найденными триггерами.
-3. Автообучение trigger-токенов по confidence.
+2. AI-анализатор через адаптеры (DeepSeek/OpenAI-compatible и т.д.).
+3. Автообучение trigger-токенов (слова и фразы).
 4. Callback-события по статусам 1..6.
+5. LRU+TTL in-memory кеш результатов AI для повторяющихся сообщений.
 
 ## Структура
 
-- `core` — основной API (`New`, `Run`, `ProcessMessage`, `ProcessBatch`, `On`).
-- `engine` — потокобезопасный in-memory движок.
-- `models` — сообщения и результаты AI (компактный и полный JSON форматы).
+- `core` — основная логика.
+- `engine` — потокобезопасный in-memory движок триггеров.
+- `models` — сообщения и результаты AI (компактный и полный JSON).
 - `interfaces` — интерфейсы AI/Storage/Callback/Logger.
-- `adapters/ai` — DeepSeek(OpenAI-compatible) адаптер.
-- `adapters/storage` — Memory + SQL адаптеры.
+- `adapters/ai` — AI-адаптеры.
+- `adapters/storage` — Storage-адаптеры.
 
 ## Статусы
 
@@ -27,13 +28,13 @@
 
 ## Форматы AI-ответа
 
-Поддерживается компактный формат:
+Компактный:
 
 ```json
 {"a":4,"b":"reason","c":0.93,"d":["token"],"e":123,"f":777}
 ```
 
-И полный формат:
+Полный:
 
 ```json
 {"status_code":4,"reason":"reason","confidence":0.93,"trigger_tokens":["token"],"violator_user_id":123,"message_id":777}
@@ -50,9 +51,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elum-utils/censor"
 	"github.com/elum-utils/censor/adapters/ai"
 	"github.com/elum-utils/censor/adapters/storage"
-	"github.com/elum-utils/censor"
 )
 
 func Service(db *sql.DB, apiKey, model, baseURL string) func(ctx context.Context) error {
@@ -65,10 +66,12 @@ func Service(db *sql.DB, apiKey, model, baseURL string) func(ctx context.Context
 			APIKey:  apiKey,
 			Model:   model,
 			BaseURL: baseURL,
+			// SystemPrompt: "custom prompt ...", // optional
 		})
 		if err != nil {
 			return err
 		}
+
 		storageAdapter, err := storage.NewSQLAdapter(db, "censor_tokens")
 		if err != nil {
 			return err
@@ -80,22 +83,56 @@ func Service(db *sql.DB, apiKey, model, baseURL string) func(ctx context.Context
 			SyncInterval:        1 * time.Minute,
 			ConfidenceThreshold: 0.7,
 			MaxMessageSize:      4 * 1024,
-			MaxLearnTokenLength: 255, // AI может добавлять слова и фразы до 255 символов
+			MaxLearnTokenLength: 255,
+			CacheTTL:            1 * time.Hour,
+			CacheMaxBytes:       32 * censor.MB,
 		})
 
 		_ = c.OnAllowClean(func(ctx context.Context, e censor.ViolationEvent) error {
 			fmt.Printf("[CENSOR][%s] msg=%d user=%d reason=%s\n", censor.EventAllowClean, e.MessageID, e.ViolatorUserID, e.Reason)
 			return nil
 		})
+		_ = c.OnMarkAbuse(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
+		_ = c.OnHumanReview(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
+		_ = c.OnAutoRestrict(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
+		_ = c.OnAutoBanEscalate(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
+		_ = c.OnCriticalEscalate(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
 
 		return c.Run(ctx)
 	}
 }
 ```
 
-## Batch по умолчанию
+## Обработка с опциями
 
-AI получает массив сообщений в формате:
+Можно принудительно обходить pre-filter по триггерам:
+
+```go
+res, err := c.ProcessMessageWithOptions(ctx, msg, censor.ProcessOptions{
+	SkipTriggerFilter: true,
+})
+```
+
+Есть batch-вариант:
+
+```go
+res, err := c.ProcessBatchWithOptions(ctx, messages, censor.ProcessOptions{
+	SkipTriggerFilter: true,
+})
+```
+
+## Кеш AI-результатов
+
+- Ключ кеша: текст сообщения (`message.Data` после trim по `MaxMessageSize`).
+- Значение: полный `AIResult` + TTL.
+- Кеш: LRU + TTL, фоновая очистка в горутине.
+- При cache-hit AI не вызывается.
+- В cache-hit сохраняется исходное решение (`status/reason/confidence/tokens`), но подставляются текущие `MessageID` и `ViolatorUserID`.
+- Работает и в batch: для каждого сообщения проверяется кеш отдельно.
+
+## Batch формат для AI
+
+По умолчанию AI получает массив:
 
 ```json
 [{"id":1,"user":2,"data":"text"}]

@@ -19,6 +19,13 @@ const (
 	EventAutoRestrict     = core.EventAutoRestrict
 	EventAutoBanEscalate  = core.EventAutoBanEscalate
 	EventCriticalEscalate = core.EventCriticalEscalate
+
+	B  = core.B
+	KB = core.KB
+	MB = core.MB
+	GB = core.GB
+	TB = core.TB
+	PB = core.PB
 )
 
 // New creates a new content safety filter.

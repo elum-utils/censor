@@ -15,12 +15,14 @@ import (
 
 type mockAI struct {
 	batchCalled atomic.Bool
+	callCount   atomic.Int64
 	result      models.AIResult
 	err         error
 }
 
 func (m *mockAI) Name() string { return "mock" }
 func (m *mockAI) Analyze(_ context.Context, msg models.Message) (models.AIResult, error) {
+	m.callCount.Add(1)
 	if m.err != nil {
 		return models.AIResult{}, m.err
 	}
@@ -35,6 +37,7 @@ func (m *mockAI) Analyze(_ context.Context, msg models.Message) (models.AIResult
 }
 func (m *mockAI) AnalyzeBatch(_ context.Context, msgs []models.Message) ([]models.AIResult, error) {
 	m.batchCalled.Store(true)
+	m.callCount.Add(int64(len(msgs)))
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -255,5 +258,185 @@ func TestAutoLearnSkipsTooLongPhrase(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if st.hasToken(longPhrase) {
 		t.Fatalf("too long token must not be persisted")
+	}
+}
+
+func TestNegativeResultCacheBypassesAIAndUsesCurrentMessageData(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:     models.StatusCommercialOffPlatform,
+		Reason:         "promo",
+		Confidence:     0.91,
+		TriggerTokens:  []string{"buy now"},
+		ViolatorUserID: 999,
+		MessageID:      999,
+	}}
+	c := New(Options{
+		AIAnalyzer:    ai,
+		Storage:       newMockStorage("buy"),
+		CacheTTL:      time.Hour,
+		CacheMaxBytes: 64 * KB,
+	})
+	if err := c.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := c.ProcessMessage(context.Background(), models.Message{ID: 1, User: 11, Data: "buy now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Triggered {
+		t.Fatalf("expected trigger")
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected one AI call, got %d", ai.callCount.Load())
+	}
+
+	second, err := c.ProcessMessage(context.Background(), models.Message{ID: 2, User: 22, Data: "buy now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected AI bypass from cache, got %d calls", ai.callCount.Load())
+	}
+	if second.AIResult.MessageID != 2 || second.AIResult.ViolatorUserID != 22 {
+		t.Fatalf("expected current message/user in cached result, got %+v", second.AIResult)
+	}
+	if second.AIResult.StatusCode != models.StatusCommercialOffPlatform {
+		t.Fatalf("unexpected status: %d", second.AIResult.StatusCode)
+	}
+}
+
+func TestCacheTTLExpiration(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:    models.StatusSuspicious,
+		Confidence:    0.9,
+		TriggerTokens: []string{"bad"},
+	}}
+	c := New(Options{
+		AIAnalyzer:    ai,
+		Storage:       newMockStorage("bad"),
+		CacheTTL:      10 * time.Millisecond,
+		CacheMaxBytes: 8 * KB,
+	})
+	if err := c.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := c.ProcessMessage(context.Background(), models.Message{ID: 1, User: 1, Data: "bad content"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected first AI call")
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	_, err = c.ProcessMessage(context.Background(), models.Message{ID: 2, User: 2, Data: "bad content"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 2 {
+		t.Fatalf("expected second AI call after TTL, got %d", ai.callCount.Load())
+	}
+}
+
+func TestProcessBatchKeepsInputOrder(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:    models.StatusSuspicious,
+		Confidence:    0.8,
+		TriggerTokens: []string{"bad"},
+	}}
+	c := New(Options{AIAnalyzer: ai, Storage: newMockStorage("bad")})
+	_ = c.SyncOnce(context.Background())
+
+	in := []models.Message{
+		{ID: 10, User: 1, Data: "hello"},
+		{ID: 20, User: 2, Data: "bad content"},
+		{ID: 30, User: 3, Data: "world"},
+	}
+	out, err := c.ProcessBatch(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != len(in) {
+		t.Fatalf("unexpected len: %d", len(out))
+	}
+	for i := range in {
+		if out[i].Message.ID != in[i].ID {
+			t.Fatalf("order mismatch at %d: got %d want %d", i, out[i].Message.ID, in[i].ID)
+		}
+	}
+}
+
+func TestBatchCacheUsesCachePerMessageAndCallsAIForMisses(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:    models.StatusCommercialOffPlatform,
+		Confidence:    0.9,
+		TriggerTokens: []string{"buy now"},
+	}}
+	c := New(Options{
+		AIAnalyzer:    ai,
+		Storage:       newMockStorage("buy", "bad"),
+		CacheTTL:      time.Hour,
+		CacheMaxBytes: 32 * KB,
+	})
+	_ = c.SyncOnce(context.Background())
+
+	// Warm cache for "buy now".
+	_, err := c.ProcessMessage(context.Background(), models.Message{ID: 1, User: 11, Data: "buy now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected warm-up AI call")
+	}
+
+	// Batch has one cached message + one uncached triggered message.
+	out, err := c.ProcessBatch(context.Background(), []models.Message{
+		{ID: 2, User: 22, Data: "buy now"},
+		{ID: 3, User: 33, Data: "bad content"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 2 {
+		t.Fatalf("AI should be called only for cache-miss message, got calls=%d", ai.callCount.Load())
+	}
+	if out[0].AIResult.StatusCode == models.StatusClean {
+		t.Fatalf("expected cached negative status for first message")
+	}
+	if out[1].AIResult.StatusCode != models.StatusCommercialOffPlatform {
+		t.Fatalf("expected analyzed status for second message, got %d", out[1].AIResult.StatusCode)
+	}
+}
+
+func TestCacheStoresCleanResultsToo(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode: models.StatusClean,
+		Reason:     "safe",
+		Confidence: 0.95,
+	}}
+	c := New(Options{
+		AIAnalyzer:    ai,
+		Storage:       newMockStorage(),
+		CacheTTL:      time.Hour,
+		CacheMaxBytes: 32 * KB,
+	})
+	_ = c.SyncOnce(context.Background())
+
+	_, err := c.ProcessMessageWithOptions(context.Background(), models.Message{ID: 1, User: 10, Data: "same text"}, ProcessOptions{SkipTriggerFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected first AI call")
+	}
+
+	_, err = c.ProcessMessageWithOptions(context.Background(), models.Message{ID: 2, User: 20, Data: "same text"}, ProcessOptions{SkipTriggerFilter: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ai.callCount.Load() != 1 {
+		t.Fatalf("expected clean cache hit to bypass AI, got calls=%d", ai.callCount.Load())
 	}
 }

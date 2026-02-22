@@ -19,6 +19,8 @@ const (
 	defaultSyncInterval        = 5 * time.Minute
 	defaultMaxMessageSize      = 4 * 1024
 	defaultMaxLearnTokenLength = 255
+	defaultCacheTTL            = 1 * time.Hour
+	defaultCacheMaxBytes       = 32 * MB
 )
 
 // EventName is a callback bus event.
@@ -66,6 +68,8 @@ type Options struct {
 	SyncInterval        time.Duration
 	MaxMessageSize      int
 	MaxLearnTokenLength int
+	CacheTTL            time.Duration
+	CacheMaxBytes       int
 	AutoLearn           bool
 	DisableAutoLearn    bool
 }
@@ -83,7 +87,9 @@ type Core struct {
 	syncInterval        time.Duration
 	maxMessageSize      int
 	maxLearnTokenLength int
+	negativeCacheTTL    time.Duration
 	autoLearn           bool
+	negativeCache       *negativeResultCache
 
 	eventsMu sync.RWMutex
 	events   map[EventName][]EventHandler
@@ -101,6 +107,7 @@ func New(opt Options) *Core {
 		syncInterval:        defaultSyncInterval,
 		maxMessageSize:      defaultMaxMessageSize,
 		maxLearnTokenLength: defaultMaxLearnTokenLength,
+		negativeCacheTTL:    defaultCacheTTL,
 		autoLearn:           true,
 	}
 
@@ -115,6 +122,13 @@ func New(opt Options) *Core {
 	}
 	if opt.MaxLearnTokenLength > 0 {
 		c.maxLearnTokenLength = opt.MaxLearnTokenLength
+	}
+	if opt.CacheTTL > 0 {
+		c.negativeCacheTTL = opt.CacheTTL
+	}
+	cacheMaxBytes := defaultCacheMaxBytes
+	if opt.CacheMaxBytes > 0 {
+		cacheMaxBytes = opt.CacheMaxBytes
 	}
 	if opt.AutoLearn {
 		c.autoLearn = true
@@ -134,6 +148,8 @@ func New(opt Options) *Core {
 
 	c.ai = opt.AIAnalyzer
 	c.storage = opt.Storage
+	c.negativeCache = newNegativeResultCache(int64(cacheMaxBytes))
+	c.startNegativeCacheJanitor()
 
 	return c
 }
@@ -246,18 +262,31 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 		return nil, nil
 	}
 
-	out := make([]models.Violation, 0, len(messages))
-	toAnalyze := make([]models.Message, 0, len(messages))
-	preTrigger := make(map[int64][]string, len(messages))
+	type pendingAnalyze struct {
+		index    int
+		message  models.Message
+		triggers []string
+	}
 
-	for _, msg := range messages {
+	out := make([]models.Violation, len(messages))
+	filled := make([]bool, len(messages))
+	toAnalyze := make([]pendingAnalyze, 0, len(messages))
+
+	for i, msg := range messages {
 		prepared := msg
 		if len(prepared.Data) > c.maxMessageSize {
 			prepared.Data = prepared.Data[:c.maxMessageSize]
 		}
+		cacheKey := prepared.Data
 		if opt.SkipTriggerFilter {
-			toAnalyze = append(toAnalyze, prepared)
-			preTrigger[prepared.ID] = nil
+			if cached, ok := c.getCachedNegative(cacheKey, prepared); ok {
+				v := models.Violation{Message: prepared, Triggered: false, AIResult: cached}
+				c.record(v)
+				out[i] = v
+				filled[i] = true
+				continue
+			}
+			toAnalyze = append(toAnalyze, pendingAnalyze{index: i, message: prepared, triggers: nil})
 			continue
 		}
 		triggers := c.engine.FindTriggers(prepared.Data)
@@ -270,18 +299,32 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 				MessageID:      prepared.ID,
 			}}
 			c.record(v)
-			out = append(out, v)
+			out[i] = v
+			filled[i] = true
 			continue
 		}
-		toAnalyze = append(toAnalyze, prepared)
-		preTrigger[prepared.ID] = triggers
+		if cached, ok := c.getCachedNegative(cacheKey, prepared); ok {
+			if len(cached.TriggerTokens) == 0 {
+				cached.TriggerTokens = triggers
+			}
+			v := models.Violation{Message: prepared, Triggered: true, AIResult: cached}
+			c.record(v)
+			out[i] = v
+			filled[i] = true
+			continue
+		}
+		toAnalyze = append(toAnalyze, pendingAnalyze{index: i, message: prepared, triggers: triggers})
 	}
 
 	if len(toAnalyze) == 0 {
 		return out, nil
 	}
 
-	results, err := c.analyze(ctx, toAnalyze)
+	aiMessages := make([]models.Message, 0, len(toAnalyze))
+	for _, p := range toAnalyze {
+		aiMessages = append(aiMessages, p.message)
+	}
+	results, err := c.analyze(ctx, aiMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -290,15 +333,15 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 	for _, r := range results {
 		byID[r.MessageID] = r
 	}
-
-	for _, msg := range toAnalyze {
+	for _, p := range toAnalyze {
+		msg := p.message
 		r, ok := byID[msg.ID]
 		if !ok {
 			r = models.AIResult{
 				StatusCode:     models.StatusSuspicious,
 				Reason:         "missing AI result",
 				Confidence:     0,
-				TriggerTokens:  preTrigger[msg.ID],
+				TriggerTokens:  p.triggers,
 				ViolatorUserID: msg.User,
 				MessageID:      msg.ID,
 			}
@@ -310,14 +353,21 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 			r.MessageID = msg.ID
 		}
 		if len(r.TriggerTokens) == 0 {
-			r.TriggerTokens = preTrigger[msg.ID]
+			r.TriggerTokens = p.triggers
 		}
-		v := models.Violation{Message: msg, Triggered: len(preTrigger[msg.ID]) > 0, AIResult: r}
+		v := models.Violation{Message: msg, Triggered: len(p.triggers) > 0, AIResult: r}
+		c.setCachedNegative(msg.Data, r)
 		c.learn(r)
 		c.record(v)
-		out = append(out, v)
+		out[p.index] = v
+		filled[p.index] = true
 	}
 
+	for i := range out {
+		if !filled[i] {
+			return nil, fmt.Errorf("core: internal batch result mismatch at index %d", i)
+		}
+	}
 	return out, nil
 }
 
@@ -498,6 +548,59 @@ func (c *Core) logWarn(msg string, fields map[string]any) {
 	if c.logger != nil {
 		c.logger.Warn(msg, fields)
 	}
+}
+
+func (c *Core) getCachedNegative(key string, message models.Message) (models.AIResult, bool) {
+	if c.negativeCache == nil {
+		return models.AIResult{}, false
+	}
+	res, ok := c.negativeCache.Get(key, time.Now())
+	if !ok {
+		return models.AIResult{}, false
+	}
+	res.MessageID = message.ID
+	res.ViolatorUserID = message.User
+	return res, true
+}
+
+func (c *Core) setCachedNegative(key string, result models.AIResult) {
+	if c.negativeCache == nil || key == "" {
+		return
+	}
+	if !result.StatusCode.Valid() {
+		return
+	}
+	c.negativeCache.Set(key, result, c.negativeCacheTTL, time.Now())
+}
+
+func (c *Core) startNegativeCacheJanitor() {
+	if c.negativeCache == nil {
+		return
+	}
+	interval := time.Minute
+	if c.negativeCacheTTL > 0 && c.negativeCacheTTL < interval {
+		interval = c.negativeCacheTTL
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.logWarn("negative cache janitor panic", map[string]any{"panic": fmt.Sprint(r)})
+			}
+		}()
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						c.logWarn("negative cache sweep panic", map[string]any{"panic": fmt.Sprint(r)})
+					}
+				}()
+				c.negativeCache.RemoveExpired(time.Now())
+			}()
+		}
+	}()
 }
 
 type noopCallbacks struct{}
