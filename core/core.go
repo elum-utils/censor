@@ -338,7 +338,7 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 		r, ok := byID[msg.ID]
 		if !ok {
 			r = models.AIResult{
-				StatusCode:     models.StatusSuspicious,
+				StatusCode:     models.StatusHumanReview,
 				Reason:         "missing AI result",
 				Confidence:     0,
 				TriggerTokens:  p.triggers,
@@ -394,6 +394,10 @@ func (c *Core) analyze(ctx context.Context, messages []models.Message) ([]models
 
 func (c *Core) learn(result models.AIResult) {
 	if !c.autoLearn || c.storage == nil {
+		return
+	}
+	// Learn only from higher-risk classes (4..6).
+	if result.StatusCode < models.StatusSuspicious {
 		return
 	}
 	if result.Confidence < c.confidenceThreshold {
@@ -466,13 +470,13 @@ func (c *Core) dispatchByStatus(ctx context.Context, e ViolationEvent) {
 		err = c.cb.OnClean(ctx, toViolation(e))
 	case models.StatusNonCriticalAbuse:
 		err = c.cb.OnNonCriticalAbuse(ctx, toViolation(e))
-	case models.StatusSuspicious:
+	case models.StatusHumanReview:
 		err = c.cb.OnSuspicious(ctx, toViolation(e))
-	case models.StatusCommercialOffPlatform:
+	case models.StatusSuspicious:
 		err = c.cb.OnCommercialOffPlatform(ctx, toViolation(e))
-	case models.StatusDangerousIllegal:
+	case models.StatusCommercialOffPlatform:
 		err = c.cb.OnDangerousIllegal(ctx, toViolation(e))
-	case models.StatusCritical:
+	case models.StatusDangerousIllegal:
 		err = c.cb.OnCritical(ctx, toViolation(e))
 	}
 	if err != nil {
@@ -503,13 +507,13 @@ func eventNameFromCode(code models.StatusCode) EventName {
 		return EventAllowClean
 	case models.StatusNonCriticalAbuse:
 		return EventMarkAbuse
-	case models.StatusSuspicious:
+	case models.StatusHumanReview:
 		return EventHumanReview
-	case models.StatusCommercialOffPlatform:
+	case models.StatusSuspicious:
 		return EventAutoRestrict
-	case models.StatusDangerousIllegal:
+	case models.StatusCommercialOffPlatform:
 		return EventAutoBanEscalate
-	case models.StatusCritical:
+	case models.StatusDangerousIllegal:
 		return EventCriticalEscalate
 	default:
 		return EventHumanReview

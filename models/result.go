@@ -11,10 +11,15 @@ type StatusCode int
 const (
 	StatusClean StatusCode = 1 + iota
 	StatusNonCriticalAbuse
+	StatusHumanReview
 	StatusSuspicious
 	StatusCommercialOffPlatform
 	StatusDangerousIllegal
-	StatusCritical
+)
+
+// Backward-compatible aliases (deprecated names).
+const (
+	StatusCritical = StatusDangerousIllegal
 )
 
 // Valid returns true when status code is in range [1..6].

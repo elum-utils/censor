@@ -11,7 +11,7 @@ func TestAIResultCompactUnmarshal(t *testing.T) {
 	if err := json.Unmarshal(payload, &r); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	if r.StatusCode != StatusCommercialOffPlatform || r.ViolatorUserID != 77 || r.MessageID != 11 {
+	if r.StatusCode != StatusSuspicious || r.ViolatorUserID != 77 || r.MessageID != 11 {
 		t.Fatalf("unexpected result: %+v", r)
 	}
 }
@@ -22,7 +22,7 @@ func TestAIResultFullUnmarshal(t *testing.T) {
 	if err := json.Unmarshal(payload, &r); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	if r.StatusCode != StatusDangerousIllegal {
+	if r.StatusCode != StatusCommercialOffPlatform {
 		t.Fatalf("unexpected code: %d", r.StatusCode)
 	}
 }

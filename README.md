@@ -21,10 +21,10 @@
 
 - `1` clean
 - `2` non-critical abuse
-- `3` suspicious
-- `4` commercial/off-platform
-- `5` dangerous/illegal
-- `6` critical
+- `3` human review required
+- `4` suspicious (competitors, moving users to other apps because it's better)
+- `5` commercial/off-platform (selling intimate content/services, etc.)
+- `6` dangerous/illegal
 
 ## Форматы AI-ответа
 
@@ -33,6 +33,18 @@
 ```json
 {"a":4,"b":"reason","c":0.93,"d":["token"],"e":123,"f":777}
 ```
+
+Минимальный компактный (рекомендуется для экономии токенов):
+
+```json
+{"a":4,"f":777,"c":0.93,"d":["token"]}
+```
+
+Где:
+- `a` — `status_code`
+- `f` — `message_id`
+- `c` — `confidence`
+- `d` — `trigger_tokens`
 
 Полный:
 

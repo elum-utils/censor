@@ -103,7 +103,7 @@ func TestProcessMessageAndMetrics(t *testing.T) {
 	if m[models.StatusDangerousIllegal] != 1 {
 		t.Fatalf("unexpected metrics: %+v", m)
 	}
-	if cbs.dangerous.Load() != 1 || processed.called.Load() != 1 {
+	if cbs.critical.Load() != 1 || processed.called.Load() != 1 {
 		t.Fatalf("callbacks not called")
 	}
 }

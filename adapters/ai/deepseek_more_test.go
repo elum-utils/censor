@@ -89,8 +89,8 @@ func TestExtractAndParseErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if arr[0].StatusCode != models.StatusSuspicious {
-		t.Fatalf("expected fallback suspicious")
+	if arr[0].StatusCode != models.StatusHumanReview {
+		t.Fatalf("expected fallback human review")
 	}
 }
 

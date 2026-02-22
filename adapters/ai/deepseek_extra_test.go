@@ -36,6 +36,27 @@ func TestNewDeepSeekAdapterSystemPromptPriority(t *testing.T) {
 	if a.prompt != "prompt-A" {
 		t.Fatalf("expected SystemPrompt to have priority, got: %s", a.prompt)
 	}
+	if got := a.systemPromptFor(true); got != "prompt-A" {
+		t.Fatalf("custom prompt should be used as-is, got: %s", got)
+	}
+}
+
+func TestSystemPromptForMode(t *testing.T) {
+	a, err := NewDeepSeekAdapter(DeepSeekOptions{APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	single := a.systemPromptFor(false)
+	batch := a.systemPromptFor(true)
+	if single == batch {
+		t.Fatalf("single and batch prompts must differ")
+	}
+	if !strings.Contains(single, "{\"a\":status_code") {
+		t.Fatalf("single prompt format not found")
+	}
+	if !strings.Contains(batch, "[{\"a\":status_code") {
+		t.Fatalf("batch prompt format not found")
+	}
 }
 
 func TestExtractContentErrorsAndFence(t *testing.T) {
@@ -57,8 +78,8 @@ func TestParseResultsSingleInvalidCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out[0].StatusCode != models.StatusSuspicious {
-		t.Fatalf("expected fallback status")
+	if out[0].StatusCode != models.StatusHumanReview {
+		t.Fatalf("expected fallback status (human review)")
 	}
 }
 

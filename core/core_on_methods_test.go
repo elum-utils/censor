@@ -32,10 +32,10 @@ func TestOnConvenienceMethods(t *testing.T) {
 	for _, code := range []models.StatusCode{
 		models.StatusClean,
 		models.StatusNonCriticalAbuse,
+		models.StatusHumanReview,
 		models.StatusSuspicious,
 		models.StatusCommercialOffPlatform,
 		models.StatusDangerousIllegal,
-		models.StatusCritical,
 	} {
 		c.record(models.Violation{Message: models.Message{ID: int64(code), User: 1}, AIResult: models.AIResult{StatusCode: code, ViolatorUserID: 1}})
 	}

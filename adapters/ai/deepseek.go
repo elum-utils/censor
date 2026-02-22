@@ -14,33 +14,37 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-const defaultSystemPrompt = `You are a content safety classifier for an anonymous messenger. Return strict JSON only.
-Use code:
+const defaultSystemPromptBase = `Classify messages for an anonymous messenger and return JSON only.
+Codes:
 1 clean
-2 non-critical abuse
-3 suspicious
-4 commercial/off-platform
-5 dangerous/illegal
-6 critical
+2 non-critical abuse (insults, abuse, sexual content, etc.)
+3 human review required
+4 suspicious (competitors, moving users to other apps because it is "better")
+5 commercial/off-platform (selling intimate content/services and similar)
+6 dangerous/illegal (everything else dangerous or illegal)
 
-Domain rules:
-- Intimate/sexual conversation between users is allowed by default.
-- Critical priority: detect sales/commercial intent, including intimate services/content sold for money.
-- Escalate commercial behavior when messages contain calls to move to other platforms specifically to continue selling, payment, booking, or deal execution.
-- Neutral contact exchange is allowed (e.g., "let's chat later in Telegram/VK") when there is no sales intent.
-- Base classification on intent and context, not platform names alone.
+Rules:
+- Intimate/sexual chat is allowed.
+- Detect sales intent, including paid intimate content/services.
+- Moving users to other platforms due to competitor reasons is suspicious (4).
+- Neutral contact exchange without sales intent is allowed.
+- For levels 1..3 trigger tokens omitted.
+- For levels 4..6 include short trigger words/phrases (max 255 chars each).`
 
-Trigger tokens can be single words or short phrases, each max 255 characters.
-Return compact format: {"a":status_code,"b":"reason","c":confidence,"d":["trigger_tokens"],"e":violator_user_id,"f":message_id}.
-For batch input, return array of objects.`
+const defaultSystemPromptSingleOutput = `Return compact JSON with minimal tokens:
+{"a":status_code,"f":message_id,"c":confidence,"d":["token_or_phrase"]}`
+
+const defaultSystemPromptBatchOutput = `Return compact JSON array with minimal tokens:
+[{"a":status_code,"f":message_id,"c":confidence,"d":["token_or_phrase"]}]`
 
 // DeepSeekAdapter is an HTTP AI adapter compatible with OpenAI-style chat completions.
 type DeepSeekAdapter struct {
-	baseURL  string
-	model    string
-	client   *resty.Client
-	prompt   string
-	endpoint string
+	baseURL      string
+	model        string
+	client       *resty.Client
+	prompt       string
+	customPrompt bool
+	endpoint     string
 }
 
 // DeepSeekOptions configures adapter.
@@ -68,16 +72,20 @@ func NewDeepSeekAdapter(opt DeepSeekOptions) (*DeepSeekAdapter, error) {
 	if opt.Timeout <= 0 {
 		opt.Timeout = 15 * time.Second
 	}
-	prompt := defaultSystemPrompt
+	prompt := defaultSystemPromptBase + "\n" + defaultSystemPromptSingleOutput
+	customPrompt := false
 	if strings.TrimSpace(opt.SystemPrompt) != "" {
 		prompt = opt.SystemPrompt
+		customPrompt = true
 	} else if strings.TrimSpace(opt.SystemHint) != "" {
 		prompt = opt.SystemHint
+		customPrompt = true
 	}
 	return &DeepSeekAdapter{
-		baseURL:  strings.TrimRight(opt.BaseURL, "/"),
-		model:    opt.Model,
-		endpoint: buildChatCompletionsURL(strings.TrimRight(opt.BaseURL, "/")),
+		baseURL:      strings.TrimRight(opt.BaseURL, "/"),
+		model:        opt.Model,
+		endpoint:     buildChatCompletionsURL(strings.TrimRight(opt.BaseURL, "/")),
+		customPrompt: customPrompt,
 		client: resty.New().
 			SetTimeout(opt.Timeout).
 			SetBaseURL(strings.TrimRight(opt.BaseURL, "/")).
@@ -175,7 +183,7 @@ func (d *DeepSeekAdapter) buildPayload(messages []models.Message) ([]byte, error
 	body := requestPayload{
 		Model: d.model,
 		Messages: []requestMessage{
-			{Role: "system", Content: d.prompt},
+			{Role: "system", Content: d.systemPromptFor(len(messages) > 1)},
 			{Role: "user", Content: string(userPayload)},
 		},
 		Temperature: 0,
@@ -185,6 +193,16 @@ func (d *DeepSeekAdapter) buildPayload(messages []models.Message) ([]byte, error
 		},
 	}
 	return json.Marshal(body)
+}
+
+func (d *DeepSeekAdapter) systemPromptFor(batch bool) string {
+	if d.customPrompt {
+		return d.prompt
+	}
+	if batch {
+		return defaultSystemPromptBase + "\n" + defaultSystemPromptBatchOutput
+	}
+	return defaultSystemPromptBase + "\n" + defaultSystemPromptSingleOutput
 }
 
 type chatCompletionResponse struct {
@@ -226,7 +244,7 @@ func parseResults(content string) ([]models.AIResult, error) {
 		}
 		for i := range arr {
 			if !arr[i].StatusCode.Valid() {
-				arr[i].StatusCode = models.StatusSuspicious
+				arr[i].StatusCode = models.StatusHumanReview
 			}
 		}
 		return arr, nil
@@ -237,7 +255,7 @@ func parseResults(content string) ([]models.AIResult, error) {
 		return nil, err
 	}
 	if !one.StatusCode.Valid() {
-		one.StatusCode = models.StatusSuspicious
+		one.StatusCode = models.StatusHumanReview
 	}
 	return []models.AIResult{one}, nil
 }

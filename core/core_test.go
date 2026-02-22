@@ -261,6 +261,27 @@ func TestAutoLearnSkipsTooLongPhrase(t *testing.T) {
 	}
 }
 
+func TestAutoLearnOnlyFromLevelFourAndAbove(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode:    models.StatusHumanReview, // level 3
+		Confidence:    0.99,
+		TriggerTokens: []string{"should-not-learn"},
+	}}
+	st := newMockStorage("bad")
+	c := New(Options{
+		AIAnalyzer:          ai,
+		Storage:             st,
+		ConfidenceThreshold: 0.7,
+		AutoLearn:           true,
+	})
+	_ = c.SyncOnce(context.Background())
+	_, _ = c.ProcessBatch(context.Background(), []models.Message{{ID: 1, User: 2, Data: "bad"}})
+	time.Sleep(20 * time.Millisecond)
+	if st.hasToken("should-not-learn") {
+		t.Fatalf("must not learn tokens for levels 1..3")
+	}
+}
+
 func TestNegativeResultCacheBypassesAIAndUsesCurrentMessageData(t *testing.T) {
 	ai := &mockAI{result: models.AIResult{
 		StatusCode:     models.StatusCommercialOffPlatform,
