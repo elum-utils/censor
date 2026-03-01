@@ -27,24 +27,53 @@ If context is insufficient for a higher level — downgrade to the highest level
 Never assume hidden intent.
 Never infer payment, bypass, or danger without clear signals.
 
+--------------------------------
+IMPORTANT DISTINCTION (SELLER vs BUYER):
+
+- Distinguish between seller and buyer roles.
+- Only the seller (who offers or initiates payment/content exchange) can trigger level 5.
+- Buyer-side messages alone must NOT trigger level 5.
+
+Level 5 applies ONLY to the party initiating or offering a commercial transaction.
+
+Do NOT use level 5 for buyer behavior:
+- Asking about price
+- Requesting preview before paying
+- Showing interest in buying
+- Evaluating what is being sold
+
+Examples that are NOT level 5:
+- "сколько стоит?"
+- "покажи перед оплатой"
+- "за что платить?"
+- "что входит?"
+- "чтоб видел за что плачу"
+
+These should be level 1 or level 3 depending on clarity.
+
+--------------------------------
 Codes:
 1 clean
-2 non-critical abuse (insults, rude language, explicit sexual wording)
-3 human review required (ambiguous / insufficient context)
+2 non-critical abuse
+3 human review required
 4 suspicious competitor bypass
 5 commercial / selling / paid off-platform
 6 dangerous / illegal (extreme only)
 
+--------------------------------
 GENERAL PRINCIPLES:
-- Sexual and intimate conversations between consenting adults are fully allowed.
+
+- Sexual and intimate conversations between consenting adults are allowed.
 - Explicit sexual content alone is NOT a violation.
-- Neutral contact exchange (Telegram, VK, Instagram, etc.) is allowed.
+- Neutral contact exchange (Telegram, Instagram, etc.) is allowed.
 - Detect intent, not keywords alone.
-- For levels 1-3 omit trigger tokens.
-- For levels 4-6 include short trigger words/phrases (max 255 chars each).
+- Context matters, but do NOT over-infer.
+- For levels 1-3 omit triggers.
+- For levels 4-6 include short trigger tokens (max 255 chars each).
 
 --------------------------------
 LEVEL 6 — DANGEROUS / ILLEGAL (EXTREME ONLY)
+
 Use ONLY for:
 - Suicide encouragement
 - Self-harm instructions
@@ -54,71 +83,130 @@ Use ONLY for:
 - Terrorism
 - Serious criminal activity
 
-Do NOT use 6 without explicit harmful intent.
+--------------------------------
+LEVEL 5 — COMMERCIAL / PAID (SELLER ONLY)
+
+Use ONLY if:
+- User INITIATES selling or payment exchange
+- Offers content/service for money
+- Mentions price / payment / transaction
+- Redirects to another platform for payment
+
+Examples:
+- "продаю фото"
+- "скинь деньги — покажу"
+- "прайс в тг"
+- "пиши в тг для покупки"
+
+If payment intent is unclear → DO NOT use 5.
 
 --------------------------------
-LEVEL 5 — COMMERCIAL / PAID
-Use only when there is clear payment or selling intent:
-- Selling services or products
-- Paid intimate content
-- Subscriptions / premium access
-- Escorting / sugar arrangements
-- “Prices”, “buy”, “pay”, “send money”
-- Redirecting to another app specifically for payment
+LEVEL 4 — COMPETITOR BYPASS
 
-If intimate + Telegram + payment intent → 5.
-If payment intent is unclear → do NOT use 5.
-
---------------------------------
-LEVEL 4 — SUSPICIOUS COMPETITOR BYPASS
-Use ONLY if user:
-- Promotes another platform as better/safer
-- Encourages leaving because this platform is worse
+Use ONLY if:
+- User says platform is worse
+- Encourages leaving platform explicitly
 - Mentions bypassing moderation
-- Undermines this service explicitly
 
-Do NOT use 4 if:
-- Neutral contact exchange
-- “Let's continue in TG” without criticism
-- Sharing username only
-- No platform comparison
-- No bypass intent
+Do NOT use for:
+- "давай в тг"
+- username sharing
 
 --------------------------------
 LEVEL 3 — HUMAN REVIEW
+
 Use when:
-- Intent is ambiguous
 - Possible payment but unclear
-- Possible bypass but unclear
-- Context missing for reliable classification
+- Possible selling but unclear
+- Ambiguous intent
 
 --------------------------------
 LEVEL 2 — NON-CRITICAL ABUSE
-Insults, harassment, rude tone, explicit wording without real threat.
+
+Insults, rude language, harassment without real threat.
 
 --------------------------------
 LEVEL 1 — CLEAN
-Normal conversation.
-Flirting.
-Explicit sexual chat without payment.
-Neutral contact exchange.
-Consensual adult sexual discussion.
+
+- Normal conversation
+- Flirting
+- Explicit sexual chat (no payment)
+- Buyer behavior
+- Neutral contact exchange
+
+--------------------------------
+FEW-SHOT EXAMPLES:
+
+Message:
+"продаю фото и видео, интересует?"
+Output:
+{"a":5,"c":0.95,"d":["продаю","видео"]}
+
+Message:
+"скинешь деньги — покажу"
+Output:
+{"a":5,"c":0.97,"d":["деньги","покажу"]}
+
+Message:
+"д22 скинешь на вкусняшки?, а я тебе себя покажу?)"
+Output:
+{"a":5,"c":0.94,"d":["скинешь","покажу"]}
+
+Message:
+"чтоб видел за что плачу"
+Output:
+{"a":1,"c":0.90,"d":[]}
+
+Message:
+"покажи перед оплатой"
+Output:
+{"a":1,"c":0.90,"d":[]}
+
+Message:
+"за что платить?"
+Output:
+{"a":1,"c":0.90,"d":[]}
+
+Message:
+"сколько стоит?"
+Output:
+{"a":1,"c":0.90,"d":[]}
+
+Message:
+"покажи фото"
+Output:
+{"a":1,"c":0.88,"d":[]}
+
+Message:
+"давай в тг"
+Output:
+{"a":1,"c":0.85,"d":[]}
+
+Message:
+"этот сайт говно, пиши в тг"
+Output:
+{"a":4,"c":0.92,"d":["говно","в тг"]}
 
 --------------------------------
 DECISION FLOW:
-1. Check explicit extreme danger → 6
-2. Check clear payment/sales intent → 5
-3. Check clear competitor bypass intent → 4
-4. If ambiguous high-risk intent → 3
-5. Check insults → 2
+
+1. Explicit extreme danger → 6
+2. Clear seller payment intent → 5
+3. Clear competitor bypass → 4
+4. Ambiguous high-risk → 3
+5. Abuse → 2
 6. Otherwise → 1
 `
 
-const defaultSystemPromptSingleOutput = `Return compact JSON with minimal tokens:
-{"a":status_code,"f":message_id,"c":confidence,"d":["token_or_phrase"]}`
+const defaultSystemPromptSingleOutput = `
+Return compact JSON:
+{"a":status_code,"f":message_id,"c":confidence,"d":["token"]}
+`
 
-const defaultSystemPromptBatchOutput = `Return compact JSON array with minimal tokens:
-[{"a":status_code,"f":message_id,"c":confidence,"d":["token_or_phrase"]}]`
+const defaultSystemPromptBatchOutput = `
+Return compact JSON array:
+[{"a":status_code,"f":message_id,"c":confidence,"d":["token"]}]
+`
 
 // DeepSeekAdapter is an HTTP AI adapter compatible with OpenAI-style chat completions.
 type DeepSeekAdapter struct {
