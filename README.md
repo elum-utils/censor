@@ -2,17 +2,17 @@
 
 `github.com/elum-utils/censor` — пакет многоуровневой модерации контента на Go:
 
-1. Быстрый in-memory pre-filter (case-insensitive, low-allocation).
-2. AI-анализатор через адаптеры (DeepSeek/OpenAI-compatible и т.д.).
-3. Автообучение trigger-токенов (слова и фразы).
-4. Callback-события по статусам 1..6.
-5. LRU+TTL in-memory кеш результатов AI для повторяющихся сообщений.
+1. Быстрый in-memory pre-filter (case-insensitive).
+2. AI-анализ через адаптеры (DeepSeek/OpenAI-compatible и т.д.).
+3. Callback-события по статусам `1..6`.
+4. LRU+TTL in-memory кеш результатов AI для повторяющихся сообщений.
+5. Автообучение trigger-токенов (только для уровней `4..6`).
 
 ## Структура
 
-- `core` — основная логика.
-- `engine` — потокобезопасный in-memory движок триггеров.
-- `models` — сообщения и результаты AI (компактный и полный JSON).
+- `core` — основная логика и публичный API.
+- `engine` — in-memory движок триггеров.
+- `models` — сообщения и результаты AI.
 - `interfaces` — интерфейсы AI/Storage/Callback/Logger.
 - `adapters/ai` — AI-адаптеры.
 - `adapters/storage` — Storage-адаптеры.
@@ -22,19 +22,13 @@
 - `1` clean
 - `2` non-critical abuse
 - `3` human review required
-- `4` suspicious (competitors, moving users to other apps because it's better)
-- `5` commercial/off-platform (selling intimate content/services, etc.)
+- `4` suspicious (конкуренты, переманивание в другие приложения)
+- `5` commercial/off-platform (продажа интима/услуг и т.д.)
 - `6` dangerous/illegal
 
 ## Форматы AI-ответа
 
-Компактный:
-
-```json
-{"a":4,"b":"reason","c":0.93,"d":["token"],"e":123,"f":777}
-```
-
-Минимальный компактный (рекомендуется для экономии токенов):
+Рекомендуемый компактный формат:
 
 ```json
 {"a":4,"f":777,"c":0.93,"d":["token"]}
@@ -46,11 +40,7 @@
 - `c` — `confidence`
 - `d` — `trigger_tokens`
 
-Полный:
-
-```json
-{"status_code":4,"reason":"reason","confidence":0.93,"trigger_tokens":["token"],"violator_user_id":123,"message_id":777}
-```
+Поддерживаются также расширенные поля (`b`, `e`) и полный формат для обратной совместимости.
 
 ## Пример интеграции
 
@@ -101,7 +91,7 @@ func Service(db *sql.DB, apiKey, model, baseURL string) func(ctx context.Context
 		})
 
 		_ = c.OnAllowClean(func(ctx context.Context, e censor.ViolationEvent) error {
-			fmt.Printf("[CENSOR][%s] msg=%d user=%d reason=%s\n", censor.EventAllowClean, e.MessageID, e.ViolatorUserID, e.Reason)
+			fmt.Printf("[CENSOR][%s] msg=%d user=%d cache=%t\n", censor.EventAllowClean, e.MessageID, e.ViolatorUserID, e.CacheHit)
 			return nil
 		})
 		_ = c.OnMarkAbuse(func(ctx context.Context, e censor.ViolationEvent) error { return nil })
@@ -125,7 +115,7 @@ res, err := c.ProcessMessageWithOptions(ctx, msg, censor.ProcessOptions{
 })
 ```
 
-Есть batch-вариант:
+Batch-вариант:
 
 ```go
 res, err := c.ProcessBatchWithOptions(ctx, messages, censor.ProcessOptions{
@@ -135,12 +125,19 @@ res, err := c.ProcessBatchWithOptions(ctx, messages, censor.ProcessOptions{
 
 ## Кеш AI-результатов
 
-- Ключ кеша: текст сообщения (`message.Data` после trim по `MaxMessageSize`).
-- Значение: полный `AIResult` + TTL.
-- Кеш: LRU + TTL, фоновая очистка в горутине.
+- Ключ: текст сообщения (`message.Data` после ограничения `MaxMessageSize`).
+- Значение: `AIResult` + TTL.
+- Политика: LRU + TTL, фоновая очистка в горутине.
 - При cache-hit AI не вызывается.
-- В cache-hit сохраняется исходное решение (`status/reason/confidence/tokens`), но подставляются текущие `MessageID` и `ViolatorUserID`.
-- Работает и в batch: для каждого сообщения проверяется кеш отдельно.
+- В cache-hit используется исходное решение AI, но подставляются текущие `MessageID` и `ViolatorUserID`.
+- В `ViolationEvent` есть явный признак `CacheHit`.
+- Работает и в batch: каждое сообщение проверяется отдельно.
+
+## Обучение токенов
+
+- Автообучение работает только для уровней `4..6`.
+- Для `1..3` trigger-токены от AI можно не возвращать.
+- Длина каждого токена/фразы ограничена `MaxLearnTokenLength` (по умолчанию 255).
 
 ## Batch формат для AI
 

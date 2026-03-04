@@ -461,3 +461,42 @@ func TestCacheStoresCleanResultsToo(t *testing.T) {
 		t.Fatalf("expected clean cache hit to bypass AI, got calls=%d", ai.callCount.Load())
 	}
 }
+
+func TestViolationEventCacheHitFlag(t *testing.T) {
+	ai := &mockAI{result: models.AIResult{
+		StatusCode: models.StatusCommercialOffPlatform,
+		Confidence: 0.9,
+	}}
+	c := New(Options{
+		AIAnalyzer:    ai,
+		Storage:       newMockStorage("buy"),
+		CacheTTL:      time.Hour,
+		CacheMaxBytes: 64 * KB,
+	})
+	if err := c.SyncOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var secondEvent ViolationEvent
+	var calls atomic.Int64
+	_ = c.OnAutoBanEscalate(func(_ context.Context, e ViolationEvent) error {
+		n := calls.Add(1)
+		if n == 2 {
+			secondEvent = e
+		}
+		return nil
+	})
+
+	_, _ = c.ProcessMessage(context.Background(), models.Message{ID: 1, User: 10, Data: "buy now"})
+	_, _ = c.ProcessMessage(context.Background(), models.Message{ID: 2, User: 20, Data: "buy now"})
+
+	if calls.Load() != 2 {
+		t.Fatalf("expected 2 events, got %d", calls.Load())
+	}
+	if !secondEvent.CacheHit {
+		t.Fatalf("expected second event to be cache-hit")
+	}
+	if secondEvent.MessageID != 2 || secondEvent.ViolatorUserID != 20 {
+		t.Fatalf("expected current message/user in second event, got %+v", secondEvent)
+	}
+}

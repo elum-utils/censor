@@ -45,6 +45,7 @@ type ViolationEvent struct {
 	TriggerTokens   []string
 	StatusCode      models.StatusCode
 	TriggeredByRule bool
+	CacheHit        bool
 }
 
 // EventHandler handles one moderation event.
@@ -280,7 +281,7 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 		cacheKey := prepared.Data
 		if opt.SkipTriggerFilter {
 			if cached, ok := c.getCachedNegative(cacheKey, prepared); ok {
-				v := models.Violation{Message: prepared, Triggered: false, AIResult: cached}
+				v := models.Violation{Message: prepared, Triggered: false, CacheHit: true, AIResult: cached}
 				c.record(v)
 				out[i] = v
 				filled[i] = true
@@ -307,7 +308,7 @@ func (c *Core) ProcessBatchWithOptions(ctx context.Context, messages []models.Me
 			if len(cached.TriggerTokens) == 0 {
 				cached.TriggerTokens = triggers
 			}
-			v := models.Violation{Message: prepared, Triggered: true, AIResult: cached}
+			v := models.Violation{Message: prepared, Triggered: true, CacheHit: true, AIResult: cached}
 			c.record(v)
 			out[i] = v
 			filled[i] = true
@@ -458,6 +459,7 @@ func (c *Core) record(v models.Violation) {
 		TriggerTokens:   v.AIResult.TriggerTokens,
 		StatusCode:      code,
 		TriggeredByRule: v.Triggered,
+		CacheHit:        v.CacheHit,
 	}
 	c.dispatchByStatus(context.Background(), e)
 	c.dispatchEvent(context.Background(), e)
@@ -545,6 +547,7 @@ func toViolation(e ViolationEvent) models.Violation {
 			MessageID:      e.MessageID,
 		},
 		Triggered: e.TriggeredByRule,
+		CacheHit:  e.CacheHit,
 	}
 }
 

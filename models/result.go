@@ -94,4 +94,5 @@ type Violation struct {
 	Message   Message
 	AIResult  AIResult
 	Triggered bool
+	CacheHit  bool
 }
