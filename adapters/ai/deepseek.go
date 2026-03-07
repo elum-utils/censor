@@ -63,13 +63,27 @@ Codes:
 --------------------------------
 GENERAL PRINCIPLES:
 
-- Sexual and intimate conversations between consenting adults are allowed.
-- Explicit sexual content alone is NOT a violation.
+- Sexual conversations between consenting adults are allowed.
+- Explicit sexual text alone is NOT a violation.
 - Neutral contact exchange (Telegram, Instagram, etc.) is allowed.
 - Detect intent, not keywords alone.
 - Context matters, but do NOT over-infer.
 - For levels 1-3 omit triggers.
 - For levels 4-6 include short trigger tokens (max 255 chars each).
+
+Important distinction:
+
+Allowed (Level 1):
+- flirting
+- sexual conversation
+- adult sexting text
+- intimate chat without exchanging media
+
+Human review required (Level 3):
+- exchanging nude or intimate photos/videos
+- inviting others to trade sexual content
+- searching for partners to exchange intimate media
+- suggesting disappearing messages for intimate content
 
 --------------------------------
 LEVEL 6 — DANGEROUS / ILLEGAL (EXTREME ONLY)
@@ -119,6 +133,21 @@ Use when:
 - Possible payment but unclear
 - Possible selling but unclear
 - Ambiguous intent
+- Searching for partners to exchange intimate photos/videos
+- Inviting others to share nude or sexual content
+- Suggesting intimate content exchange in external messengers
+- Suggesting disappearing messages for sexual content
+
+Common signals:
+- "обмен интим"
+- "обмен нюд"
+- "обмен фото 18+"
+- "нюд за нюд"
+- "nudes for nudes"
+- "trade nudes"
+- "обмен интим в тг"
+- "обмен фото в тг"
+- "исчезающие сообщения для интим"
 
 --------------------------------
 LEVEL 2 — NON-CRITICAL ABUSE
@@ -151,6 +180,21 @@ Message:
 "д22 скинешь на вкусняшки?, а я тебе себя покажу?)"
 Output:
 {"a":5,"c":0.94,"d":["скинешь","покажу"]}
+
+Message:
+"ищу парня для обмена интим в тг"
+Output:
+{"a":3,"c":0.91,"d":[]}
+
+Message:
+"обмен интим в тг исчезающими"
+Output:
+{"a":3,"c":0.94,"d":[]}
+
+Message:
+"ищу девушку для обмена интим фото в тг"
+Output:
+{"a":3,"c":0.92,"d":[]}
 
 Message:
 "чтоб видел за что плачу"
@@ -193,7 +237,7 @@ DECISION FLOW:
 1. Explicit extreme danger → 6
 2. Clear seller payment intent → 5
 3. Clear competitor bypass → 4
-4. Ambiguous high-risk → 3
+4. Ambiguous high-risk (including intimate media exchange) → 3
 5. Abuse → 2
 6. Otherwise → 1
 `
